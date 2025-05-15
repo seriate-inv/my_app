@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl_phone_field/intl_phone_field.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:math';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
@@ -18,18 +19,9 @@ class _RegisterPageState extends State<RegisterPage> {
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   String _phoneNumber = '';
-  String _otpInput = '';
-  String _generatedOtp = '';
-  DateTime? _otpExpiry;
-  bool _isSendingOtp = false;
-  bool _showOtpVerification = false;
+  bool _isRegistering = false;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
-
-  String _generateOTP() {
-    final random = Random();
-    return (100000 + random.nextInt(900000)).toString();
-  }
 
   @override
   void dispose() {
@@ -40,63 +32,71 @@ class _RegisterPageState extends State<RegisterPage> {
     super.dispose();
   }
 
-  Future<void> _sendOtp() async {
+  Future<void> _registerUser() async {
     if (_formKey.currentState!.validate()) {
-      setState(() => _isSendingOtp = true);
-      await Future.delayed(const Duration(seconds: 1));
-      
-      setState(() {
-        _generatedOtp = _generateOTP();
-        _otpExpiry = DateTime.now().add(const Duration(minutes: 5));
-        _isSendingOtp = false;
-        _showOtpVerification = true;
-      });
-      
-      debugPrint('OTP sent to ${_emailController.text}: $_generatedOtp');
+      setState(() => _isRegistering = true);
+
+      final prefs = await SharedPreferences.getInstance();
+
+      final userData = {
+        'username': _usernameController.text,
+        'email': _emailController.text,
+        'password': _passwordController.text,
+        'phone': _phoneNumber,
+      };
+
+      try {
+        final response = await http.post(
+          //Uri.parse('http://10.137.53.44:8082/api/register'),
+          Uri.parse('http://10.137.53.44:8082/api/register'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(userData),
+        );
+
+        if (response.statusCode == 200) {
+          await prefs.setString('username', _usernameController.text);
+          await prefs.setString('email', _emailController.text);
+          await prefs.setString('phone', _phoneNumber);
+          await prefs.setString('password', _passwordController.text);
+
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Registration successful!'),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+          );
+          Navigator.pushReplacementNamed(context, '/login');
+        } else {
+          _showError('Failed to register. Try again.');
+        }
+      } catch (e) {
+        _showError('Error: ${e.toString()}');
+      } finally {
+        setState(() => _isRegistering = false);
+      }
     }
   }
 
-  Future<void> _verifyOtp() async {
-    if (_otpInput == _generatedOtp && DateTime.now().isBefore(_otpExpiry!)) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('username', _usernameController.text);
-      await prefs.setString('email', _emailController.text);
-      await prefs.setString('phone', _phoneNumber);
-      await prefs.setString('password', _passwordController.text);
-      await prefs.setBool('isVerified', true);
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Registration successful!'),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10)),
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
         ),
-      );
-      Navigator.pushReplacementNamed(context, '/login');
-    } else {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _otpInput != _generatedOtp
-                ? 'Invalid OTP. Please try again.'
-                : 'OTP has expired. Please request a new one.',
-          ),
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10)),
-        ),
-      );
-    }
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    // Determine screen width to adjust layout
     double screenWidth = MediaQuery.of(context).size.width;
-    double maxWidth = screenWidth > 600 ? 500 : screenWidth * 0.9;  // Max width for large screens
+    double maxWidth = screenWidth > 600 ? 500 : screenWidth * 0.9;
 
     return Scaffold(
       body: SafeArea(
@@ -120,35 +120,25 @@ class _RegisterPageState extends State<RegisterPage> {
                       const SizedBox(height: 20),
                       Text(
                         'Create Account',
-                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: Theme.of(context)
+                            .textTheme
+                            .headlineMedium
+                            ?.copyWith(fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 8),
                       Text(
                         'Fill in your details to continue',
                         style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
-                        ),
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurface
+                                  .withOpacity(0.6),
+                            ),
                       ),
                       const SizedBox(height: 40),
                       Form(
                         key: _formKey,
-                        child: Column(
-                          children: [
-                            if (!_showOtpVerification) ...[
-                              AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 300),
-                                child: _buildRegistrationForm(),
-                              ),
-                            ] else ...[
-                              AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 300),
-                                child: _buildOtpVerification(),
-                              ),
-                            ],
-                          ],
-                        ),
+                        child: _buildRegistrationForm(),
                       ),
                     ],
                   ),
@@ -163,7 +153,6 @@ class _RegisterPageState extends State<RegisterPage> {
 
   Widget _buildRegistrationForm() {
     return Column(
-      key: const ValueKey('registration-form'),
       children: [
         TextFormField(
           controller: _usernameController,
@@ -209,7 +198,8 @@ class _RegisterPageState extends State<RegisterPage> {
                     : FontAwesomeIcons.eyeSlash,
                 size: 18,
               ),
-              onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+              onPressed: () =>
+                  setState(() => _obscurePassword = !_obscurePassword),
             ),
           ),
           validator: (value) => value == null || value.length < 6
@@ -243,18 +233,18 @@ class _RegisterPageState extends State<RegisterPage> {
           width: double.infinity,
           height: 50,
           child: FilledButton(
-            onPressed: _isSendingOtp ? null : _sendOtp,
+            onPressed: _isRegistering ? null : _registerUser,
             style: FilledButton.styleFrom(
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
+                  borderRadius: BorderRadius.circular(12)),
             ),
-            child: _isSendingOtp
+            child: _isRegistering
                 ? const SizedBox(
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Text('Register & Send OTP'),
+                : const Text('Register'),
           ),
         ),
         const SizedBox(height: 24),
@@ -268,7 +258,8 @@ class _RegisterPageState extends State<RegisterPage> {
               ),
             ),
             TextButton(
-              onPressed: () => Navigator.pushReplacementNamed(context, '/login'),
+              onPressed: () =>
+                  Navigator.pushReplacementNamed(context, '/login'),
               style: TextButton.styleFrom(
                 foregroundColor: Theme.of(context).colorScheme.primary,
               ),
@@ -279,80 +270,4 @@ class _RegisterPageState extends State<RegisterPage> {
       ],
     );
   }
-
-  Widget _buildOtpVerification() {
-    return Column(
-      key: const ValueKey('otp-verification'),
-      children: [
-        Text(
-          'Enter the 6-digit code sent to ${_emailController.text}',
-          style: Theme.of(context).textTheme.bodyLarge,
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 24),
-        TextFormField(
-          decoration: const InputDecoration(
-            labelText: 'OTP Code',
-            prefixIcon: Icon(FontAwesomeIcons.key, size: 18),
-          ),
-          keyboardType: TextInputType.number,
-          onChanged: (value) => _otpInput = value,
-        ),
-        const SizedBox(height: 16),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              'Expires in: ${_formatCountdown()}',
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.error,
-              ),
-            ),
-            TextButton(
-              onPressed: () {
-                setState(() => _showOtpVerification = false);
-              },
-              child: const Text('Change Email'),
-            ),
-          ],
-        ),
-        const SizedBox(height: 24),
-        SizedBox(
-          width: double.infinity,
-          height: 50,
-          child: FilledButton(
-            onPressed: _verifyOtp,
-            style: FilledButton.styleFrom(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
-            ),
-            child: const Text('Verify OTP'),
-          ),
-        ),
-        const SizedBox(height: 16),
-        TextButton(
-          onPressed: () {
-            _generatedOtp = _generateOTP();
-            _otpExpiry = DateTime.now().add(const Duration(minutes: 5));
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('New OTP sent!'),
-                behavior: SnackBarBehavior.floating,
-              ),
-            );
-          },
-          child: const Text('Resend OTP'),
-        ),
-      ],
-    );
-  }
-
-  String _formatCountdown() {
-    if (_otpExpiry == null) return '05:00';
-    final remaining = _otpExpiry!.difference(DateTime.now());
-    final minutes = remaining.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final seconds = remaining.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$minutes:$seconds';
-  }
 }
- 
