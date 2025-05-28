@@ -8,12 +8,12 @@ class PumpControl extends StatelessWidget {
   final double speed; // Value between 0.0 and 1.0 to represent the pump speed
 
   const PumpControl({
-    Key? key,
+    super.key,
     required this.pumpNumber,
     required this.isActive,
     required this.onToggle,
     this.speed = 0.65, // Default speed value
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -96,12 +96,12 @@ class StatusIndicator extends StatelessWidget {
   final VoidCallback onTap;
 
   const StatusIndicator({
-    Key? key,
+    super.key,
     required this.color,
     required this.isActive,
     required this.label,
     required this.onTap,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -146,7 +146,7 @@ class StatusIndicator extends StatelessWidget {
 class SpeedometerWidget extends StatelessWidget {
   final double value; // 0.0 to 1.0
 
-  const SpeedometerWidget({Key? key, required this.value}) : super(key: key);
+  const SpeedometerWidget({super.key, required this.value});
 
   @override
   Widget build(BuildContext context) {
@@ -264,7 +264,7 @@ class SpeedometerPainter extends CustomPainter {
 
 // Example of how to use this widget:
 class PumpControlExample extends StatefulWidget {
-  const PumpControlExample({Key? key}) : super(key: key);
+  const PumpControlExample({super.key});
 
   @override
   State<PumpControlExample> createState() => _PumpControlExampleState();

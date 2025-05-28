@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 class Mixer extends StatelessWidget {
   final Color color;
 
-  const Mixer({Key? key, required this.color}) : super(key: key);
+  const Mixer({super.key, required this.color});
 
   @override
   Widget build(BuildContext context) {

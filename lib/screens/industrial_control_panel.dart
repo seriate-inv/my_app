@@ -10,7 +10,7 @@ import 'package:my_app/components/pump_control.dart' as pump;
 import 'package:my_app/components/tank.dart';
 
 class IndustrialControlPanel extends StatefulWidget {
-  const IndustrialControlPanel({Key? key}) : super(key: key);
+  const IndustrialControlPanel({super.key});
 
   @override
   _IndustrialControlPanelState createState() => _IndustrialControlPanelState();
@@ -21,6 +21,7 @@ class _IndustrialControlPanelState extends State<IndustrialControlPanel>
   late AnimationController _flowAnimation;
   late AnimationController _mixerAnimation;
   late AnimationController _homogenizerAnimation;
+
   bool pump1Active = true;
   bool pump2Active = true;
   double valve1Position = 50.0;
@@ -59,10 +60,12 @@ class _IndustrialControlPanelState extends State<IndustrialControlPanel>
       vsync: this,
       duration: const Duration(seconds: 2),
     )..repeat();
+
     _mixerAnimation = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 500),
     )..repeat();
+
     _homogenizerAnimation = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 500),
@@ -106,6 +109,7 @@ class _IndustrialControlPanelState extends State<IndustrialControlPanel>
             purpleFluid: Colors.purple,
             valvePosition: valve1Position,
           ),
+          // Tank 1
           Positioned(
             right: 55,
             top: 150,
@@ -113,8 +117,11 @@ class _IndustrialControlPanelState extends State<IndustrialControlPanel>
               color: tankData['tank1']!['color'],
               mixerAnimation: _mixerAnimation,
               fillLevel: tankData['tank1']!['level'] / 100,
+              leftColumnLabels: ['TI2'],
+              rightColumnLabels: ['TI3'],
             ),
           ),
+          // Tank 2
           Positioned(
             right: 260,
             top: 150,
@@ -122,24 +129,70 @@ class _IndustrialControlPanelState extends State<IndustrialControlPanel>
               color: tankData['tank2']!['color'],
               mixerAnimation: _mixerAnimation,
               fillLevel: tankData['tank2']!['level'] / 100,
+              leftColumnLabels: ['TI10'],
+              rightColumnLabels: ['TI11'],
             ),
           ),
-          Positioned(right: 265, bottom: 8, child: HeatExchanger()),
-          Positioned(left: 100, bottom: 150, child: HeatExchanger()),
-          Positioned(right: 60, bottom: 8, child: Chiller()),
-          Positioned(right: 60, top: 20, child: Chiller()),
-          Positioned(left: 100, bottom: 20, child: Chiller()),
+          Positioned(
+            right: 302,
+            top: 460,
+            child: HeatExchanger(
+              title: 'Heat Exchanger 1',
+              buttonLabels: ['TI5', 'TI6', 'TI8'], // Added TI8 as an example
+              //bottomButtonLabel: '',
+            ),
+          ),
+          Positioned(
+            left: 80,
+            bottom: 130,
+            child: HeatExchanger(
+              title: 'Heat Exchanger 2',
+              buttonLabels: ['TI18'],
+              bottomButtonLabel: 'TI20',
+            ),
+          ),
+          Positioned(
+            right: 60,
+            bottom: 8,
+            child: Chiller(
+              buttonLabels: ['TI4', 'TI7', 'TI9'],
+              topLabel: '',
+              chillerName: 'Chiller 2',
+            ),
+          ),
+          Positioned(
+            right: 60,
+            top: 20,
+            child: Chiller(buttonLabels: ['TI1'], chillerName: 'Chiller 1'),
+          ),
+          Positioned(
+            left: 100,
+            bottom: 20,
+            child: Chiller(
+              buttonLabels: ['TI19', 'TI21', 'TI22'], // Added TI19 here
+              chillerName: 'Chiller 3',
+            ),
+          ),
           Positioned(right: 400, top: 200, child: HeatingCoil()),
           Positioned(left: 630, top: 200, child: NonReturningValve()),
           Positioned(left: 550, bottom: 32, child: NonReturningValve()),
+          // Homogenizer with TI15, TI16, TI17
           Positioned(
             left: 100,
-            top: 200,
+            top: 180,
             child: Homogenizer(animation: _homogenizerAnimation),
           ),
-          Positioned(left: 470, top: 230, child: Valve()),
-          Positioned(left: 470, bottom: 50, child: Valve()),
-          Positioned(left: 570, bottom: 180, child: Valve()),
+          Positioned(left: 470, top: 230, child: Valve(showTempButton: false)),
+          Positioned(
+            left: 470,
+            bottom: 50,
+            child: Valve(showTempButton: false),
+          ),
+          Positioned(
+            left: 570,
+            bottom: 180,
+            child: Valve(showTempButton: true),
+          ),
           Positioned(
             right: 60,
             bottom: 100,

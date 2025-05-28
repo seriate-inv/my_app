@@ -4,8 +4,7 @@ class IndicatorLight extends StatelessWidget {
   final Color color;
   final bool isOn;
 
-  const IndicatorLight({Key? key, required this.color, required this.isOn})
-      : super(key: key);
+  const IndicatorLight({super.key, required this.color, required this.isOn});
 
   @override
   Widget build(BuildContext context) {

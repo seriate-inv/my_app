@@ -571,7 +571,7 @@ Widget buildHomogenizer(
         Text(
           'Homogenizer',
           style: TextStyle(
-            color: Colors.white,
+            color: const Color.fromARGB(255, 255, 255, 255),
             fontWeight: FontWeight.bold,
             fontSize: isSmallScreen ? 7 : 9,
           ),
@@ -582,7 +582,7 @@ Widget buildHomogenizer(
           builder: (context, child) {
             return Transform.rotate(
               angle: homogenizerAnimation.value * 2 * math.pi,
-              child: Container(
+              child: SizedBox(
                 width: isSmallScreen ? 30 : 40,
                 height: isSmallScreen ? 30 : 40,
                 child: CustomPaint(painter: MixerPainter(color: Colors.lime)),
@@ -922,9 +922,9 @@ class _IndustrialControlPanelState extends State<IndustrialControlPanel>
   late AnimationController _mixerAnimationController;
   late AnimationController _homogenizerAnimationController;
   double _valvePosition = 50;
-  double _flowRate = 15.5;
-  bool _pump1Active = true;
-  bool _pump2Active = false;
+  final double _flowRate = 15.5;
+  final bool _pump1Active = true;
+  final bool _pump2Active = false;
 
   @override
   void initState() {

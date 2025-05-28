@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 class HeaderBar extends StatelessWidget {
   final Map<String, Map<String, dynamic>> tankData;
 
-  const HeaderBar({Key? key, required this.tankData}) : super(key: key);
+  const HeaderBar({super.key, required this.tankData});
 
   @override
   Widget build(BuildContext context) {

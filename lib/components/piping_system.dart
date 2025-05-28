@@ -302,7 +302,7 @@ class PipingSystem extends StatelessWidget {
   final Size? size;
 
   const PipingSystem({
-    Key? key,
+    super.key,
     required this.flowAnimation,
     required this.redFluid,
     required this.blueFluid,
@@ -328,7 +328,7 @@ class PipingSystem extends StatelessWidget {
       'valvesHomogenizer': true,
       'sampling': true,
     },
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

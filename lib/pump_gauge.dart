@@ -5,8 +5,7 @@ class PumpGauge extends StatelessWidget {
   final double currentValue;
   final double maxValue;
 
-  const PumpGauge({Key? key, required this.currentValue, required this.maxValue})
-      : super(key: key);
+  const PumpGauge({super.key, required this.currentValue, required this.maxValue});
 
   @override
   Widget build(BuildContext context) {

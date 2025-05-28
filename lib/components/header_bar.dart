@@ -4,9 +4,9 @@ class HeaderBar extends StatelessWidget {
   final Map<String, Map<String, dynamic>> tankData;
 
   const HeaderBar({
-    Key? key,
+    super.key,
     required this.tankData,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

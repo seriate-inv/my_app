@@ -10,14 +10,14 @@ class PipingSystem extends StatelessWidget {
   final double valvePosition;
 
   const PipingSystem({
-    Key? key,
+    super.key,
     required this.animationValue,
     required this.redFluid,
     required this.blueFluid,
     required this.pinkFluid,
     required this.purpleFluid,
     required this.valvePosition,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

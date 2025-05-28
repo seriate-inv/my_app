@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 class StopButton extends StatelessWidget {
   final VoidCallback onPressed;
 
-  const StopButton({Key? key, required this.onPressed}) : super(key: key);
+  const StopButton({super.key, required this.onPressed});
 
   @override
   Widget build(BuildContext context) {

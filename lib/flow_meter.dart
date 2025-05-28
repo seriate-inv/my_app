@@ -4,7 +4,7 @@ import 'dart:math' as math;
 class FlowMeter extends StatelessWidget {
   final double flowRate;
 
-  const FlowMeter({Key? key, required this.flowRate}) : super(key: key);
+  const FlowMeter({super.key, required this.flowRate});
 
   @override
   Widget build(BuildContext context) {
