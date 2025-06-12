@@ -39,24 +39,22 @@ class Tank extends StatefulWidget {
   final AnimationController mixerAnimation;
   final double fillLevel;
   final bool showTemperatureButtons;
-
-  // Updated button labels to match the desired layout
   final List<String> leftColumnLabels;
   final List<String> rightColumnLabels;
   final Map<String, Offset> temperatureButtonOffsets;
-  final double buttonSpacing; // Space between buttons
+  final double buttonSpacing;
 
   const Tank({
-    Key? key,
+    super.key,
     required this.color,
     required this.mixerAnimation,
     required this.fillLevel,
     this.showTemperatureButtons = true,
-    this.leftColumnLabels = const ['10', '2'], // Left column labels
-    this.rightColumnLabels = const ['11', '3'], // Right column labels
+    this.leftColumnLabels = const [],
+    this.rightColumnLabels = const [],
     this.temperatureButtonOffsets = const {},
-    this.buttonSpacing = 20.0, // Default spacing
-  }) : super(key: key);
+    this.buttonSpacing = 20.0,
+  });
 
   @override
   _TankState createState() => _TankState();
@@ -66,11 +64,30 @@ class _TankState extends State<Tank> {
   bool _isLoading = false;
   String? _error;
   List<double> _tempValues = [];
+  String _currentLabel = "";
 
-  Future<void> _fetchTemperature() async {
+  Map<String, double> _latestValue = {};
+  Map<String, String> _mappedLabels = {
+    'TI1': 'TI2',
+    'TI7': 'TI9',
+    'TI15': 'TI16',
+    'TI22': 'TI21',
+    'TC': 'TH',
+  };
+
+  Map<String, String> _reverseMappedLabels = {
+    'TI2': 'TI1',
+    'TI9': 'TI7',
+    'TI16': 'TI15',
+    'TI21': 'TI22',
+    'TH': 'TC',
+  };
+
+  Future<void> _fetchTemperature(String label) async {
     setState(() {
       _isLoading = true;
       _error = null;
+      _currentLabel = label;
     });
 
     try {
@@ -81,11 +98,13 @@ class _TankState extends State<Tank> {
         _tempValues = data.map((item) => item.temperature).toList();
       });
 
-      _showTemperatureDialog();
+      _showTemperatureDialog(label);
     } catch (e) {
       setState(() => _error = e.toString());
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error fetching $label temperature: $e')),
+      );
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -93,31 +112,60 @@ class _TankState extends State<Tank> {
     }
   }
 
-  void _showTemperatureDialog() {
+  void _showTemperatureDialog(String label) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Tank Temperature'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: _tempValues.length,
-            itemBuilder: (context, index) {
-              return ListTile(
-                title: Text('${_tempValues[index].toStringAsFixed(2)} °C'),
-              );
-            },
+      builder:
+          (context) => AlertDialog(
+            title: Text('$label Tank Temperature Readings'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: _tempValues.length,
+                itemBuilder: (context, index) {
+                  final original = _tempValues[index];
+                  return ListTile(
+                    title: Text('Original: ${original.toStringAsFixed(2)} °C'),
+                    trailing: ElevatedButton(
+                      child: const Text('Update'),
+                      onPressed: () {
+                        _updateTemperature(label, original);
+                        Navigator.of(context).pop();
+                      },
+                    ),
+                  );
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Close'),
+              ),
+            ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
     );
+  }
+
+  void _updateTemperature(String label, double originalTemp) {
+    final mapped = _mappedLabels[label];
+    if (mapped != null) {
+      setState(() {
+        _latestValue[mapped] = originalTemp + 3.0; // simulate updated value
+      });
+    }
+  }
+
+  String? _getMappedDisplay(String label) {
+    if (_reverseMappedLabels.containsKey(label)) {
+      final source = _reverseMappedLabels[label]!;
+      final updated = _latestValue[label];
+      if (updated != null) {
+        return '${source}: ${updated.toStringAsFixed(2)} °C';
+      }
+    }
+    return null;
   }
 
   @override
@@ -128,7 +176,6 @@ class _TankState extends State<Tank> {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          // Tank structure
           Positioned(
             left: 60,
             child: Container(
@@ -176,41 +223,36 @@ class _TankState extends State<Tank> {
               ),
             ),
           ),
-
-          // Temperature buttons - positioned in two columns
           if (widget.showTemperatureButtons) ...[
-            // Left column (10 and 2)
             Positioned(
               top: 28,
-              left:10,
+              left: 10,
               child: SizedBox(
                 width: 50,
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.start,
                   children: [
                     for (var label in widget.leftColumnLabels)
                       Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.only(bottom: 76),
                         child: _buildTemperatureButton(label: label),
                       ),
                   ],
                 ),
               ),
             ),
-            // Right column (11 and 3)
             Positioned(
-              top: 10,
-              left: 30,
+              top: 28,
+              right: 10,
               child: SizedBox(
                 width: 50,
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.start,
                   children: [
                     for (var label in widget.rightColumnLabels)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: _buildTemperatureButton(label: label),
-                      ),
+                      if (label.trim().isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 76),
+                          child: _buildTemperatureButton(label: label),
+                        ),
                   ],
                 ),
               ),
@@ -222,6 +264,8 @@ class _TankState extends State<Tank> {
   }
 
   Widget _buildTemperatureButton({required String label}) {
+    final mappedDisplay = _getMappedDisplay(label);
+
     return Container(
       width: 50,
       height: 30,
@@ -233,25 +277,36 @@ class _TankState extends State<Tank> {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: _fetchTemperature,
+          onTap: () => _fetchTemperature(label),
           child: Center(
-            child: _isLoading
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.black,
+            child:
+                _isLoading && _currentLabel == label
+                    ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.black,
+                      ),
+                    )
+                    : mappedDisplay != null
+                    ? Text(
+                      mappedDisplay,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 8,
+                        color: Colors.black,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    )
+                    : Text(
+                      label,
+                      style: const TextStyle(
+                        color: Colors.black,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                  )
-                : Text(
-                    label,
-                    style: const TextStyle(
-                      color: Colors.black,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
           ),
         ),
       ),

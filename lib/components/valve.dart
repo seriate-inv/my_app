@@ -220,7 +220,7 @@ class _ValveSymbolPainter extends CustomPainter {
 }
 
 class NonReturningValve extends StatelessWidget {
-  const NonReturningValve({Key? key}) : super(key: key);
+  const NonReturningValve({super.key});
 
   @override
   Widget build(BuildContext context) {

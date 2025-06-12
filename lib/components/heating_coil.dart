@@ -50,8 +50,14 @@ class _HeatingCoilState extends State<HeatingCoil> {
   bool _isLoading = false;
   String? _error;
   List<double> _temperatureValues = [];
+  Map<int, double> _updatedValues = {}; // Stores updated temperature values by index
 
-  void _fetchAndShowTemperature() async {
+  // Mapping for TC to TH
+  final Map<String, String> _temperatureMapping = {
+    'TC': 'TH',
+  };
+
+  void _fetchAndShowTemperature(String label) async {
     setState(() {
       _isLoading = true;
       _error = null;
@@ -64,9 +70,13 @@ class _HeatingCoilState extends State<HeatingCoil> {
 
       setState(() {
         _temperatureValues = data.map((item) => item.temperature).toList();
+        // Only clear updates if we're viewing TC (updatable)
+        if (label == 'TC') {
+          _updatedValues.clear();
+        }
       });
 
-      _showTemperatureDialog();
+      _showTemperatureDialog(label);
     } catch (e) {
       setState(() {
         _error = e.toString();
@@ -84,22 +94,63 @@ class _HeatingCoilState extends State<HeatingCoil> {
     }
   }
 
-  void _showTemperatureDialog() {
+  void _showTemperatureDialog(String label) {
+    final isUpdatable = label == 'TC';
+    String? mappedLabel = _temperatureMapping[label];
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Heating Coil Temperature Readings'),
+        title: Text('Heating Coil - $label${isUpdatable ? ' → $mappedLabel' : ''}'),
         content: SizedBox(
           width: double.maxFinite,
           child: ListView.builder(
             shrinkWrap: true,
             itemCount: _temperatureValues.length,
             itemBuilder: (context, index) {
-              return ListTile(
-                title: Text(
-                  '${_temperatureValues[index].toStringAsFixed(2)} °C',
-                ),
-              );
+              if (isUpdatable) {
+                return Row(
+                  children: [
+                    // Original temperature value
+                    Expanded(
+                      flex: 2,
+                      child: ListTile(
+                        title: Text('${_temperatureValues[index].toStringAsFixed(2)} °C'),
+                        trailing: TextButton(
+                          onPressed: () => _showManualInputDialog(index),
+                          child: const Text('Update'),
+                        ),
+                      ),
+                    ),
+                    
+                    // Vertical divider
+                    const VerticalDivider(width: 1.5, color: Colors.black),
+                    
+                    // Updated value display
+                    Expanded(
+                      flex: 1,
+                      child: Center(
+                        child: Text(
+                          _updatedValues.containsKey(index)
+                              ? '${_updatedValues[index]!.toStringAsFixed(2)} °C'
+                              : '--',
+                          style: TextStyle(
+                            color: _updatedValues.containsKey(index)
+                                ? Colors.green
+                                : Colors.grey,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              } else {
+                // Read-only display for TH
+                return ListTile(
+                  title: Text('${_temperatureValues[index].toStringAsFixed(2)} °C'),
+                );
+              }
             },
           ),
         ),
@@ -107,6 +158,54 @@ class _HeatingCoilState extends State<HeatingCoil> {
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showManualInputDialog(int index) {
+    TextEditingController controller = TextEditingController(
+      text: _updatedValues.containsKey(index)
+          ? _updatedValues[index]!.toStringAsFixed(2)
+          : _temperatureValues[index].toStringAsFixed(2),
+    );
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Update Temperature Value'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: 'Enter new temperature (°C)',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              final value = double.tryParse(controller.text);
+              if (value != null) {
+                setState(() {
+                  _updatedValues[index] = value;
+                });
+                Navigator.of(context).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Value updated successfully!')),
+                );
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a valid number')),
+                );
+              }
+            },
+            child: const Text('Save'),
           ),
         ],
       ),
@@ -171,7 +270,7 @@ class _HeatingCoilState extends State<HeatingCoil> {
           ),
         ),
 
-        // T1 and T2 Buttons Container
+        // TC and TH Buttons Container
         Container(
           width: width * 0.3,
           height: width * 0.6,
@@ -185,12 +284,12 @@ class _HeatingCoilState extends State<HeatingCoil> {
           ),
           child: Column(
             children: [
-              // T1 Button (Top Half)
+              // TC Button (Top Half) - Updatable
               Expanded(
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    onTap: _fetchAndShowTemperature,
+                    onTap: () => _fetchAndShowTemperature('TC'),
                     borderRadius: const BorderRadius.only(
                       topRight: Radius.circular(5),
                     ),
@@ -212,12 +311,12 @@ class _HeatingCoilState extends State<HeatingCoil> {
                 height: 1,
                 color: Colors.black,
               ),
-              // T2 Button (Bottom Half)
+              // TH Button (Bottom Half) - Read only
               Expanded(
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    onTap: _fetchAndShowTemperature, // Same functionality for both
+                    onTap: () => _fetchAndShowTemperature('TH'),
                     borderRadius: const BorderRadius.only(
                       bottomRight: Radius.circular(5),
                     ),

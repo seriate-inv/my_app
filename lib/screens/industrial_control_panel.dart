@@ -117,8 +117,11 @@ class _IndustrialControlPanelState extends State<IndustrialControlPanel>
               color: tankData['tank1']!['color'],
               mixerAnimation: _mixerAnimation,
               fillLevel: tankData['tank1']!['level'] / 100,
-              leftColumnLabels: ['TI2'],
-              rightColumnLabels: ['TI3'],
+              leftColumnLabels: ['TI2', 'TI3'],
+              rightColumnLabels: [
+                'TI11',
+                'TI12',
+              ], // ✅ Separate into right column
             ),
           ),
           // Tank 2
@@ -129,8 +132,8 @@ class _IndustrialControlPanelState extends State<IndustrialControlPanel>
               color: tankData['tank2']!['color'],
               mixerAnimation: _mixerAnimation,
               fillLevel: tankData['tank2']!['level'] / 100,
-              leftColumnLabels: ['TI10'],
-              rightColumnLabels: ['TI11'],
+              //leftColumnLabels: ['u'],
+              //rightColumnLabels: ['v'],
             ),
           ),
           Positioned(

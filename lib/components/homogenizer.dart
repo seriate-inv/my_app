@@ -8,7 +8,9 @@ class HomogenizerService {
 
   Future<List<HomogenizerData>> fetchHomogenizerData() async {
     try {
-      final response = await http.get(Uri.parse(apiUrl));
+      final response = await http
+          .get(Uri.parse(apiUrl))
+          .timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
         List<dynamic> data = json.decode(response.body);
@@ -55,9 +57,17 @@ class Homogenizer extends StatefulWidget {
 class _HomogenizerState extends State<Homogenizer> {
   bool _isLoading = false;
   String? _error;
-  List<double> _tempValues = [];
+  List<double> _temperatureValues = [];
+  Map<int, double> _updatedValues = {}; // Stores updated temperature values by index
 
-  Future<void> _fetchAndShowData(BuildContext context, String title) async {
+  // Mapping for TI to corresponding label (if needed)
+  final Map<String, String> _temperatureMapping = {
+    'TI15': 'TI15',
+    'TI16': 'TI16',
+    'TI17': 'TI17',
+  };
+
+  void _fetchAndShowTemperature(String label) async {
     setState(() {
       _isLoading = true;
       _error = null;
@@ -69,10 +79,14 @@ class _HomogenizerState extends State<Homogenizer> {
       if (!mounted) return;
 
       setState(() {
-        _tempValues = data.map((item) => item.temperature).toList();
+        _temperatureValues = data.map((item) => item.temperature).toList();
+        // Only clear updates if we're viewing TI15 (updatable)
+        if (label == 'TI15') {
+          _updatedValues.clear();
+        }
       });
 
-      _showDataDialog(context, title);
+      _showTemperatureDialog(label);
     } catch (e) {
       setState(() {
         _error = e.toString();
@@ -90,22 +104,63 @@ class _HomogenizerState extends State<Homogenizer> {
     }
   }
 
-  void _showDataDialog(BuildContext context, String title) {
+  void _showTemperatureDialog(String label) {
+    final isUpdatable = label == 'TI15';
+    String? mappedLabel = _temperatureMapping[label];
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('$title Readings'),
+        title: Text('Homogenizer - $label'),
         content: SizedBox(
           width: double.maxFinite,
           child: ListView.builder(
             shrinkWrap: true,
-            itemCount: _tempValues.length,
+            itemCount: _temperatureValues.length,
             itemBuilder: (context, index) {
-              return ListTile(
-                title: Text(
-                  'Temp: ${_tempValues[index].toStringAsFixed(2)} °C',
-                ),
-              );
+              if (isUpdatable) {
+                return Row(
+                  children: [
+                    // Original temperature value
+                    Expanded(
+                      flex: 2,
+                      child: ListTile(
+                        title: Text('${_temperatureValues[index].toStringAsFixed(2)} °C'),
+                        trailing: TextButton(
+                          onPressed: () => _showManualInputDialog(index),
+                          child: const Text('Update'),
+                        ),
+                      ),
+                    ),
+                    
+                    // Vertical divider
+                    const VerticalDivider(width: 1.5, color: Colors.black),
+                    
+                    // Updated value display
+                    Expanded(
+                      flex: 1,
+                      child: Center(
+                        child: Text(
+                          _updatedValues.containsKey(index)
+                              ? '${_updatedValues[index]!.toStringAsFixed(2)} °C'
+                              : '--',
+                          style: TextStyle(
+                            color: _updatedValues.containsKey(index)
+                                ? Colors.green
+                                : Colors.grey,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              } else {
+                // Read-only display for TI16 and TI17
+                return ListTile(
+                  title: Text('${_temperatureValues[index].toStringAsFixed(2)} °C'),
+                );
+              }
             },
           ),
         ),
@@ -113,6 +168,54 @@ class _HomogenizerState extends State<Homogenizer> {
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
             child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showManualInputDialog(int index) {
+    TextEditingController controller = TextEditingController(
+      text: _updatedValues.containsKey(index)
+          ? _updatedValues[index]!.toStringAsFixed(2)
+          : _temperatureValues[index].toStringAsFixed(2),
+    );
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Update Temperature Value'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.numberWithOptions(decimal: true),
+          decoration: const InputDecoration(
+            labelText: 'Enter new temperature (°C)',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              final value = double.tryParse(controller.text);
+              if (value != null) {
+                setState(() {
+                  _updatedValues[index] = value;
+                });
+                Navigator.of(context).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Value updated successfully!')),
+                );
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a valid number')),
+                );
+              }
+            },
+            child: const Text('Save'),
           ),
         ],
       ),
@@ -134,7 +237,7 @@ class _HomogenizerState extends State<Homogenizer> {
         Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // TI15 Button
+            // TI15 Button (Updatable)
             Container(
               width: width * 0.3,
               height: width * 0.2,
@@ -149,7 +252,7 @@ class _HomogenizerState extends State<Homogenizer> {
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(
-                  onTap: () => _fetchAndShowData(context, 'TI15'),
+                  onTap: () => _fetchAndShowTemperature('TI15'),
                   borderRadius: const BorderRadius.only(
                     topLeft: Radius.circular(5),
                     topRight: Radius.circular(5),
@@ -167,7 +270,7 @@ class _HomogenizerState extends State<Homogenizer> {
                 ),
               ),
             ),
-            // TI16 Button
+            // TI16 Button (Read-only)
             Container(
               width: width * 0.3,
               height: width * 0.2,
@@ -178,7 +281,7 @@ class _HomogenizerState extends State<Homogenizer> {
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(
-                  onTap: () => _fetchAndShowData(context, 'TI16'),
+                  onTap: () => _fetchAndShowTemperature('TI16'),
                   child: Center(
                     child: Text(
                       'TI16',
@@ -192,7 +295,7 @@ class _HomogenizerState extends State<Homogenizer> {
                 ),
               ),
             ),
-            // TI17 Button
+            // TI17 Button (Read-only)
             Container(
               width: width * 0.3,
               height: width * 0.2,
@@ -207,7 +310,7 @@ class _HomogenizerState extends State<Homogenizer> {
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(
-                  onTap: () => _fetchAndShowData(context, 'TI17'),
+                  onTap: () => _fetchAndShowTemperature('TI17'),
                   borderRadius: const BorderRadius.only(
                     bottomLeft: Radius.circular(5),
                     bottomRight: Radius.circular(5),
@@ -227,9 +330,10 @@ class _HomogenizerState extends State<Homogenizer> {
             ),
           ],
         ),
+        // Main Homogenizer Container
         Container(
-          width: width * 0.7,
-          height: width * 0.6,
+          width: width * 0.9,
+          height: width * 0.61,
           decoration: BoxDecoration(
             color: Colors.grey[600],
             border: Border.all(color: Colors.black),
@@ -246,7 +350,7 @@ class _HomogenizerState extends State<Homogenizer> {
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
-                  fontSize: 12,
+                  fontSize: fontSize,
                 ),
               ),
               const SizedBox(height: 8),

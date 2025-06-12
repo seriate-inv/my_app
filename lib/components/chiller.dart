@@ -7,8 +7,8 @@ class Chiller extends StatefulWidget {
   final String chillerName;
 
   const Chiller({
-    super.key, 
-    required this.buttonLabels, 
+    super.key,
+    required this.buttonLabels,
     this.topLabel,
     required this.chillerName,
   });
@@ -21,8 +21,20 @@ class _ChillerState extends State<Chiller> {
   bool _isLoading = false;
   String? _error;
   List<double> _temperatureValues = [];
+  Map<int, double> _updatedValues =
+      {}; // Stores updated temperature values by index
 
-  void _fetchAndShowTemperature() async {
+  // Define which buttons should have update functionality
+  final Set<String> _updatableButtons = {'TI1', 'TI7', 'TI22'};
+
+  // Define your mapping here (e.g., TI1 → TI101, TI7 → TI107, etc.)
+  final Map<String, String> _temperatureMapping = {
+    'TI1': 'TI101',
+    'TI7': 'TI107',
+    'TI22': 'TI122',
+  };
+
+  void _fetchAndShowTemperature(String label) async {
     setState(() {
       _isLoading = true;
       _error = null;
@@ -34,17 +46,21 @@ class _ChillerState extends State<Chiller> {
 
       setState(() {
         _temperatureValues = data.map((item) => item.temperature).toList();
+        // Only clear updates if we're viewing an updatable button
+        if (_updatableButtons.contains(label)) {
+          _updatedValues.clear();
+        }
       });
 
-      _showTemperatureDialog();
+      _showTemperatureDialog(label);
     } catch (e) {
       setState(() {
         _error = e.toString();
       });
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
     } finally {
       if (mounted) {
         setState(() {
@@ -54,30 +70,135 @@ class _ChillerState extends State<Chiller> {
     }
   }
 
-  void _showTemperatureDialog() {
+  void _showTemperatureDialog(String label) {
+    final isUpdatable = _updatableButtons.contains(label);
+    String? mappedLabel = _temperatureMapping[label] ?? label;
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('${widget.chillerName} Temperature Readings'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: _temperatureValues.length,
-            itemBuilder: (context, index) {
-              return ListTile(
-                title: Text('${_temperatureValues[index].toStringAsFixed(2)} °C'),
-              );
-            },
+      builder:
+          (context) => AlertDialog(
+            title: Text(
+              '${widget.chillerName} - $label${isUpdatable ? ' → $mappedLabel' : ''}',
+            ),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: _temperatureValues.length,
+                itemBuilder: (context, index) {
+                  if (isUpdatable) {
+                    return Row(
+                      children: [
+                        // Original temperature value
+                        Expanded(
+                          flex: 2,
+                          child: ListTile(
+                            title: Text(
+                              '${_temperatureValues[index].toStringAsFixed(2)} °C',
+                            ),
+                            trailing: TextButton(
+                              onPressed: () => _showManualInputDialog(index),
+                              child: const Text('Update'),
+                            ),
+                          ),
+                        ),
+
+                        // Vertical divider
+                        const VerticalDivider(width: 1.5, color: Colors.black),
+
+                        // Updated value display
+                        Expanded(
+                          flex: 1,
+                          child: Center(
+                            child: Text(
+                              _updatedValues.containsKey(index)
+                                  ? '${_updatedValues[index]!.toStringAsFixed(2)} °C'
+                                  : '--',
+                              style: TextStyle(
+                                color:
+                                    _updatedValues.containsKey(index)
+                                        ? Colors.green
+                                        : Colors.grey,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  } else {
+                    // Read-only display for non-updatable buttons
+                    return ListTile(
+                      title: Text(
+                        '${_temperatureValues[index].toStringAsFixed(2)} °C',
+                      ),
+                    );
+                  }
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Close'),
+              ),
+            ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
+    );
+  }
+
+  void _showManualInputDialog(int index) {
+    TextEditingController controller = TextEditingController(
+      text:
+          _updatedValues.containsKey(index)
+              ? _updatedValues[index]!.toStringAsFixed(2)
+              : _temperatureValues[index].toStringAsFixed(2),
+    );
+
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Update Temperature Value'),
+            content: TextField(
+              controller: controller,
+              keyboardType: TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Enter new temperature (°C)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () {
+                  final value = double.tryParse(controller.text);
+                  if (value != null) {
+                    setState(() {
+                      _updatedValues[index] = value;
+                    });
+                    Navigator.of(context).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Value updated successfully!'),
+                      ),
+                    );
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Please enter a valid number'),
+                      ),
+                    );
+                  }
+                },
+                child: const Text('Save'),
+              ),
+            ],
           ),
-        ],
-      ),
     );
   }
 
@@ -169,26 +290,27 @@ class _ChillerState extends State<Chiller> {
                 ),
               ),
               child: Column(
-                children: widget.buttonLabels.map((label) {
-                  return Expanded(
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: _fetchAndShowTemperature,
-                        child: Center(
-                          child: Text(
-                            label,
-                            style: TextStyle(
-                              color: Colors.black,
-                              fontWeight: FontWeight.bold,
-                              fontSize: dynamicButtonFontSize,
+                children:
+                    widget.buttonLabels.map((label) {
+                      return Expanded(
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () => _fetchAndShowTemperature(label),
+                            child: Center(
+                              child: Text(
+                                label,
+                                style: TextStyle(
+                                  color: Colors.black,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: dynamicButtonFontSize,
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    ),
-                  );
-                }).toList(),
+                      );
+                    }).toList(),
               ),
             ),
           ],
