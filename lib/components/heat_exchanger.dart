@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'homogenizer.dart';
 
 class HeatExchanger extends StatefulWidget {
@@ -23,11 +25,14 @@ class _HeatExchangerState extends State<HeatExchanger> {
   List<double> _speedValues = [];
   List<double> _tempValues = [];
 
-  final Map<String, String> mapping = {'TC': 'TH', 'TI5': 'TI16'};
+  // Track updated TI5 values
+  Map<int, double> _updatedValues = {};
+  // For TI6: show stored values from MySQL
+  Map<int, double> _storedTI5Values = {};
 
-  Map<int, double> updatedValues = {}; // Index-wise updated data
+  final Map<String, String> _temperatureMapping = {'TC': 'TH', 'TI5': 'TI6'};
 
-  void _fetchAndShowData(String label) async {
+  Future<void> _fetchAndShowData(String label) async {
     setState(() {
       _isLoading = true;
       _error = null;
@@ -37,12 +42,21 @@ class _HeatExchangerState extends State<HeatExchanger> {
       final data = await HomogenizerService().fetchHomogenizerData();
       if (!mounted) return;
 
+      // Special handling for TI5 and TI6
+      if (label == 'TI5' || label == 'TI6') {
+        final updates = await _fetchTI5UpdatedValues();
+        setState(() {
+          if (label == 'TI5') {
+            _updatedValues = updates;
+          } else if (label == 'TI6') {
+            _storedTI5Values = updates;
+          }
+        });
+      }
+
       setState(() {
         _speedValues = data.map((item) => item.speed).toList();
         _tempValues = data.map((item) => item.temperature).toList();
-        if (label == 'TI5') {
-          updatedValues.clear(); // clear old updates only for TI5
-        }
       });
 
       _showDataDialog(label);
@@ -51,7 +65,9 @@ class _HeatExchangerState extends State<HeatExchanger> {
         _error = e.toString();
       });
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
     } finally {
       if (mounted) {
         setState(() {
@@ -61,133 +77,191 @@ class _HeatExchangerState extends State<HeatExchanger> {
     }
   }
 
+  Future<Map<int, double>> _fetchTI5UpdatedValues() async {
+    final apiUrl = 'http://127.0.0.1:5000/api/ti5_heat_exchanger';
+
+    try {
+      final response = await http.get(Uri.parse(apiUrl));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        Map<int, double> result = {};
+        for (var item in data) {
+          if (item['entry_index'] != null && item['temperature'] != null) {
+            result[item['entry_index']] = item['temperature'].toDouble();
+          }
+        }
+        return result;
+      }
+      return {};
+    } catch (e) {
+      print('Error fetching TI6 values: $e');
+      return {};
+    }
+  }
+
   void _showDataDialog(String label) {
-    String? mappedLabel = mapping[label];
-    final isUpdatable = label == 'TI5'; // Only TI5 is updatable
+    final isTI5 = label == 'TI5';
+    final isTI6 = label == 'TI6';
+    String? mappedLabel = _temperatureMapping[label];
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Readings from $label${mappedLabel != null ? ' → $mappedLabel' : ''}'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: _speedValues.length,
-            itemBuilder: (context, index) {
-              if (isUpdatable) {
-                return Row(
-                  children: [
-                    // Original Readings & Update Button (only for TI5)
-                    Expanded(
-                      flex: 2,
-                      child: ListTile(
-                        title: Text(
-                          'Speed: ${_speedValues[index].toStringAsFixed(2)} RPM',
-                        ),
-                        subtitle: Text(
-                          'Temp: ${_tempValues[index].toStringAsFixed(2)} °C',
-                        ),
-                        trailing: TextButton(
-                          onPressed: () {
-                            Navigator.of(context).pop();
-                            Future.delayed(Duration(milliseconds: 100), () {
-                              _showManualInputDialog(index);
-                            });
-                          },
-                          child: const Text('Update'),
-                        ),
-                      ),
-                    ),
-                    // Vertical Divider
-                    const VerticalDivider(width: 1.5, color: Colors.black),
-                    // Updated Value Display (only for TI5)
-                    Expanded(
-                      flex: 1,
-                      child: Center(
-                        child: Text(
-                          updatedValues.containsKey(index)
-                              ? '${updatedValues[index]!.toStringAsFixed(2)} °C'
-                              : '--',
-                          style: TextStyle(
-                            color: updatedValues.containsKey(index)
-                                ? Colors.green
-                                : Colors.grey,
-                            fontWeight: FontWeight.bold,
+      builder:
+          (context) => AlertDialog(
+            title: Text(
+              'Readings from $label${mappedLabel != null ? ' → $mappedLabel' : ''}',
+            ),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: _speedValues.length,
+                itemBuilder: (context, index) {
+                  if (isTI5 || isTI6) {
+                    final rightValue =
+                        isTI5 ? _updatedValues[index] : _storedTI5Values[index];
+
+                    return Row(
+                      children: [
+                        Expanded(
+                          flex: 2,
+                          child: ListTile(
+                            title: Text(
+                              'Speed: ${_speedValues[index].toStringAsFixed(2)} RPM',
+                            ),
+                            subtitle: Text(
+                              'Temp: ${_tempValues[index].toStringAsFixed(2)} °C',
+                            ),
+                            trailing:
+                                isTI5
+                                    ? TextButton(
+                                      onPressed: () {
+                                        Navigator.of(context).pop();
+                                        Future.delayed(
+                                          Duration(milliseconds: 100),
+                                          () {
+                                            _showManualInputDialog(index);
+                                          },
+                                        );
+                                      },
+                                      child: const Text('Update'),
+                                    )
+                                    : null,
                           ),
                         ),
+                        const VerticalDivider(width: 1.5, color: Colors.black),
+                        Expanded(
+                          flex: 1,
+                          child: Center(
+                            child: Text(
+                              rightValue != null
+                                  ? '${rightValue.toStringAsFixed(2)} °C'
+                                  : '--',
+                              style: TextStyle(
+                                color:
+                                    rightValue != null
+                                        ? Colors.green
+                                        : Colors.grey,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  } else {
+                    return ListTile(
+                      title: Text(
+                        'Speed: ${_speedValues[index].toStringAsFixed(2)} RPM',
                       ),
-                    ),
-                  ],
-                );
-              } else {
-                // Read-only display for all other buttons
-                return ListTile(
-                  title: Text(
-                    'Speed: ${_speedValues[index].toStringAsFixed(2)} RPM',
-                  ),
-                  subtitle: Text(
-                    'Temp: ${_tempValues[index].toStringAsFixed(2)} °C',
-                  ),
-                );
-              }
-            },
+                      subtitle: Text(
+                        'Temp: ${_tempValues[index].toStringAsFixed(2)} °C',
+                      ),
+                    );
+                  }
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Close'),
+              ),
+            ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
     );
   }
 
   void _showManualInputDialog(int index) {
     TextEditingController controller = TextEditingController(
-      text: updatedValues.containsKey(index)
-          ? updatedValues[index]!.toStringAsFixed(2)
-          : _tempValues[index].toStringAsFixed(2),
+      text:
+          _updatedValues.containsKey(index)
+              ? _updatedValues[index]!.toStringAsFixed(2)
+              : _tempValues[index].toStringAsFixed(2),
     );
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Enter Value Manually'),
-        content: TextField(
-          controller: controller,
-          keyboardType: TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
-            hintText: 'Enter temperature value',
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Enter Value Manually'),
+            content: TextField(
+              controller: controller,
+              keyboardType: TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                hintText: 'Enter temperature value',
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () async {
+                  final value = double.tryParse(controller.text);
+                  if (value != null) {
+                    setState(() {
+                      _updatedValues[index] = value;
+                    });
+                    Navigator.of(context).pop();
+
+                    try {
+                      final response = await http.post(
+                        Uri.parse(
+                          'http://127.0.0.1:5000/api/ti5_heat_exchanger',
+                        ),
+                        headers: {'Content-Type': 'application/json'},
+                        body: jsonEncode({
+                          'entry_index': index,
+                          'temperature': value,
+                        }),
+                      );
+
+                      if (response.statusCode == 200) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Value saved to TI5_heat_exchanger'),
+                          ),
+                        );
+                      } else {
+                        throw Exception('Failed to save: ${response.body}');
+                      }
+                    } catch (e) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Error saving: $e')),
+                      );
+                    }
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Invalid number entered')),
+                    );
+                  }
+                },
+                child: const Text('Submit'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+            ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              final value = double.tryParse(controller.text);
-              if (value != null) {
-                setState(() {
-                  updatedValues[index] = value;
-                });
-                Navigator.of(context).pop();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Manual value updated')),
-                );
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Invalid number entered')),
-                );
-              }
-            },
-            child: const Text('Submit'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
     );
   }
 
@@ -195,9 +269,7 @@ class _HeatExchangerState extends State<HeatExchanger> {
   Widget build(BuildContext context) {
     final screenSize = MediaQuery.of(context).size;
     final containerWidth = screenSize.width * 0.25;
-    final double minWidth = 50;
-    final double maxWidth = 120;
-    final width = containerWidth.clamp(minWidth, maxWidth);
+    final width = containerWidth.clamp(50.0, 120.0);
     final fontSize = width * 0.12;
     final buttonHeight = width * 0.18;
     final totalButtons =
@@ -208,7 +280,6 @@ class _HeatExchangerState extends State<HeatExchanger> {
       scrollDirection: Axis.horizontal,
       child: Row(
         children: [
-          // Buttons
           Column(
             children: [
               Container(
@@ -218,23 +289,24 @@ class _HeatExchangerState extends State<HeatExchanger> {
                   border: Border.all(color: Colors.black),
                 ),
                 child: Column(
-                  children: widget.buttonLabels.map((label) {
-                    return SizedBox(
-                      height: buttonHeight,
-                      child: InkWell(
-                        onTap: () => _fetchAndShowData(label),
-                        child: Center(
-                          child: Text(
-                            label,
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: fontSize * 0.8,
+                  children:
+                      widget.buttonLabels.map((label) {
+                        return SizedBox(
+                          height: buttonHeight,
+                          child: InkWell(
+                            onTap: () => _fetchAndShowData(label),
+                            child: Center(
+                              child: Text(
+                                label,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: fontSize * 0.8,
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
+                        );
+                      }).toList(),
                 ),
               ),
               if (widget.bottomButtonLabel != null)
@@ -260,8 +332,6 @@ class _HeatExchangerState extends State<HeatExchanger> {
                 ),
             ],
           ),
-
-          // Panel
           Container(
             width: width * 1.1,
             height: mainBodyHeight,

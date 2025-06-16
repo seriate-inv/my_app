@@ -4,7 +4,7 @@ import 'dart:convert';
 import 'dart:math';
 
 class HomogenizerService {
-  static const String apiUrl = 'http://127.0.0.1:5000/api/homogenizer';
+  static const String apiUrl = 'http://127.0.0.1:5000/api/temperature';
 
   Future<List<HomogenizerData>> fetchHomogenizerData() async {
     try {
@@ -24,24 +24,49 @@ class HomogenizerService {
       throw Exception('Failed to fetch data: $e');
     }
   }
+
+  Future<void> postHomogenizerData({
+    required int entryIndex,
+    required double temperature,
+    double speed = 0,
+  }) async {
+    final response = await http.post(
+      Uri.parse('http://127.0.0.1:5000/api/homogenizer'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'temperature': temperature,
+        'speed': speed,
+        'entry_index': entryIndex,
+      }),
+    );
+
+    if (response.statusCode != 201) {
+      throw Exception('Failed to save homogenizer data: ${response.body}');
+    }
+  }
+
+  postTI5DataToMySQL({required int entryIndex, required double temperature}) {}
 }
 
 class HomogenizerData {
   final DateTime time;
   final double speed;
   final double temperature;
+  final int entryIndex;
 
   HomogenizerData({
     required this.time,
     required this.speed,
     required this.temperature,
+    required this.entryIndex,
   });
 
   factory HomogenizerData.fromJson(Map<String, dynamic> json) {
     return HomogenizerData(
-      time: DateTime.parse(json['time']),
+      time: DateTime.parse(json['time'] ?? DateTime.now().toIso8601String()),
       speed: (json['speed'] ?? 0).toDouble(),
       temperature: (json['temperature'] ?? 0).toDouble(),
+      entryIndex: json['entry_index'] ?? 0,
     );
   }
 }
@@ -58,7 +83,8 @@ class _HomogenizerState extends State<Homogenizer> {
   bool _isLoading = false;
   String? _error;
   List<double> _temperatureValues = [];
-  Map<int, double> _updatedValues = {}; // Stores updated temperature values by index
+  Map<int, double> _updatedValues =
+      {}; // Stores updated temperature values by index
 
   // Mapping for TI to corresponding label (if needed)
   final Map<String, String> _temperatureMapping = {
@@ -80,9 +106,20 @@ class _HomogenizerState extends State<Homogenizer> {
 
       setState(() {
         _temperatureValues = data.map((item) => item.temperature).toList();
-        // Only clear updates if we're viewing TI15 (updatable)
+
+        // 👇 Overlay updated values into TI16 when fetched
+        if (label == 'TI16') {
+          _updatedValues.forEach((index, value) {
+            if (index >= 0 && index < _temperatureValues.length) {
+              _temperatureValues[index] = value;
+            }
+          });
+        }
+
         if (label == 'TI15') {
-          _updatedValues.clear();
+          // Clear old updates if you want fresh session every time:
+          // _updatedValues.clear();
+          // Or keep updates as is if you want to show in TI16
         }
       });
 
@@ -92,9 +129,9 @@ class _HomogenizerState extends State<Homogenizer> {
         _error = e.toString();
       });
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
     } finally {
       if (mounted) {
         setState(() {
@@ -110,115 +147,138 @@ class _HomogenizerState extends State<Homogenizer> {
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Homogenizer - $label'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: _temperatureValues.length,
-            itemBuilder: (context, index) {
-              if (isUpdatable) {
-                return Row(
-                  children: [
-                    // Original temperature value
-                    Expanded(
-                      flex: 2,
-                      child: ListTile(
-                        title: Text('${_temperatureValues[index].toStringAsFixed(2)} °C'),
-                        trailing: TextButton(
-                          onPressed: () => _showManualInputDialog(index),
-                          child: const Text('Update'),
-                        ),
-                      ),
-                    ),
-                    
-                    // Vertical divider
-                    const VerticalDivider(width: 1.5, color: Colors.black),
-                    
-                    // Updated value display
-                    Expanded(
-                      flex: 1,
-                      child: Center(
-                        child: Text(
-                          _updatedValues.containsKey(index)
-                              ? '${_updatedValues[index]!.toStringAsFixed(2)} °C'
-                              : '--',
-                          style: TextStyle(
-                            color: _updatedValues.containsKey(index)
-                                ? Colors.green
-                                : Colors.grey,
-                            fontWeight: FontWeight.bold,
+      builder:
+          (context) => AlertDialog(
+            title: Text('Homogenizer - $label'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: _temperatureValues.length,
+                itemBuilder: (context, index) {
+                  double valueToDisplay = _temperatureValues[index];
+
+                  // ✅ If viewing TI16, override with updated TI15 values if they exist
+                  if (label == 'TI16' && _updatedValues.containsKey(index)) {
+                    valueToDisplay = _updatedValues[index]!;
+                  }
+
+                  if (isUpdatable) {
+                    return Row(
+                      children: [
+                        Expanded(
+                          flex: 2,
+                          child: ListTile(
+                            title: Text(
+                              '${valueToDisplay.toStringAsFixed(2)} °C',
+                            ),
+                            trailing: TextButton(
+                              onPressed: () => _showManualInputDialog(index),
+                              child: const Text('Update'),
+                            ),
                           ),
                         ),
-                      ),
-                    ),
-                  ],
-                );
-              } else {
-                // Read-only display for TI16 and TI17
-                return ListTile(
-                  title: Text('${_temperatureValues[index].toStringAsFixed(2)} °C'),
-                );
-              }
-            },
+                        const VerticalDivider(width: 1.5, color: Colors.black),
+                        Expanded(
+                          flex: 1,
+                          child: Center(
+                            child: Text(
+                              _updatedValues.containsKey(index)
+                                  ? '${_updatedValues[index]!.toStringAsFixed(2)} °C'
+                                  : '--',
+                              style: TextStyle(
+                                color:
+                                    _updatedValues.containsKey(index)
+                                        ? Colors.green
+                                        : Colors.grey,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  } else {
+                    return ListTile(
+                      title: Text('${valueToDisplay.toStringAsFixed(2)} °C'),
+                    );
+                  }
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Close'),
+              ),
+            ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
     );
   }
 
   void _showManualInputDialog(int index) {
     TextEditingController controller = TextEditingController(
-      text: _updatedValues.containsKey(index)
-          ? _updatedValues[index]!.toStringAsFixed(2)
-          : _temperatureValues[index].toStringAsFixed(2),
+      text:
+          _updatedValues.containsKey(index)
+              ? _updatedValues[index]!.toStringAsFixed(2)
+              : _temperatureValues[index].toStringAsFixed(2),
     );
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Update Temperature Value'),
-        content: TextField(
-          controller: controller,
-          keyboardType: TextInputType.numberWithOptions(decimal: true),
-          decoration: const InputDecoration(
-            labelText: 'Enter new temperature (°C)',
-            border: OutlineInputBorder(),
+      builder:
+          (context) => AlertDialog(
+            title: const Text('Update Temperature Value'),
+            content: TextField(
+              controller: controller,
+              keyboardType: TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Enter new temperature (°C)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () async {
+                  final value = double.tryParse(controller.text);
+                  if (value != null) {
+                    setState(() {
+                      _updatedValues[index] = value;
+                    });
+                    try {
+                      await HomogenizerService().postHomogenizerData(
+                        entryIndex: index,
+                        temperature: value,
+                      );
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Value updated and saved to database!'),
+                        ),
+                      );
+                    } catch (e) {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Failed to save: $e')),
+                      );
+                    }
+                    Navigator.of(context).pop();
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Please enter a valid number'),
+                      ),
+                    );
+                  }
+                },
+                child: const Text('Save'),
+              ),
+            ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              final value = double.tryParse(controller.text);
-              if (value != null) {
-                setState(() {
-                  _updatedValues[index] = value;
-                });
-                Navigator.of(context).pop();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Value updated successfully!')),
-                );
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please enter a valid number')),
-                );
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
     );
   }
 
@@ -394,32 +454,57 @@ class _HomogenizerState extends State<Homogenizer> {
   }
 }
 
+Future<void> _sendToDatabase(double tempValue) async {
+  try {
+    final url = Uri.parse('http://127.0.0.1:5000/api/homogenizer');
+    final response = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'temperature': tempValue,
+        'speed': 0, // Optional, modify if you collect speed
+      }),
+    );
+
+    if (response.statusCode == 201) {
+      debugPrint('Data sent successfully');
+    } else {
+      debugPrint('Failed to send data: ${response.body}');
+    }
+  } catch (e) {
+    debugPrint('Error sending to DB: $e');
+  }
+}
+
 class FanPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.width * 0.4;
 
-    final Paint bladePaint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.fill;
+    final Paint bladePaint =
+        Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.fill;
 
     for (int i = 0; i < 3; i++) {
       canvas.save();
       canvas.translate(center.dx, center.dy);
       canvas.rotate(2 * pi * i / 3);
-      Path blade = Path()
-        ..moveTo(0, 0)
-        ..lineTo(radius, -8)
-        ..lineTo(radius, 8)
-        ..close();
+      Path blade =
+          Path()
+            ..moveTo(0, 0)
+            ..lineTo(radius, -8)
+            ..lineTo(radius, 8)
+            ..close();
       canvas.drawPath(blade, bladePaint);
       canvas.restore();
     }
 
-    final Paint centerPaint = Paint()
-      ..color = Colors.black
-      ..style = PaintingStyle.fill;
+    final Paint centerPaint =
+        Paint()
+          ..color = Colors.black
+          ..style = PaintingStyle.fill;
 
     canvas.drawCircle(center, 5, centerPaint);
   }

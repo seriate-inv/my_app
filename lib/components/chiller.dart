@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'package:my_app/temperature_service.dart';
 
 class Chiller extends StatefulWidget {
@@ -21,20 +23,22 @@ class _ChillerState extends State<Chiller> {
   bool _isLoading = false;
   String? _error;
   List<double> _temperatureValues = [];
-  Map<int, double> _updatedValues =
-      {}; // Stores updated temperature values by index
+  Map<int, double> _updatedValues = {};
+  Map<String, Map<int, double>> _allUpdatedValues =
+      {}; // Stores updates for all labels
 
-  // Define which buttons should have update functionality
   final Set<String> _updatableButtons = {'TI1', 'TI7', 'TI22'};
+  final Set<String> _readOnlyButtons = {'TI2', 'TI9', 'TI21'}; // Added TI2
 
-  // Define your mapping here (e.g., TI1 → TI101, TI7 → TI107, etc.)
   final Map<String, String> _temperatureMapping = {
     'TI1': 'TI101',
     'TI7': 'TI107',
     'TI22': 'TI122',
+    'TI2': 'TI102', // Added for TI2
+    'TI9': 'TI109',
+    'TI21': 'TI121',
   };
-
-  void _fetchAndShowTemperature(String label) async {
+  Future<void> _fetchAndShowTemperature(String label) async {
     setState(() {
       _isLoading = true;
       _error = null;
@@ -44,12 +48,26 @@ class _ChillerState extends State<Chiller> {
       final data = await TemperatureService().fetchTemperatureData();
       if (!mounted) return;
 
+      // For updatable buttons, fetch the updated values from MySQL
+      if (_updatableButtons.contains(label)) {
+        final updatedValues = await _fetchUpdatedValues(label);
+        setState(() {
+          _updatedValues = updatedValues;
+        });
+      }
+      // For read-only buttons, fetch the corresponding updated values
+      else if (_readOnlyButtons.contains(label)) {
+        final sourceLabel = _getSourceLabelForReadOnly(label);
+        if (sourceLabel != null) {
+          final updatedValues = await _fetchUpdatedValues(sourceLabel);
+          setState(() {
+            _allUpdatedValues[label] = updatedValues;
+          });
+        }
+      }
+
       setState(() {
         _temperatureValues = data.map((item) => item.temperature).toList();
-        // Only clear updates if we're viewing an updatable button
-        if (_updatableButtons.contains(label)) {
-          _updatedValues.clear();
-        }
       });
 
       _showTemperatureDialog(label);
@@ -70,85 +88,86 @@ class _ChillerState extends State<Chiller> {
     }
   }
 
-  void _showTemperatureDialog(String label) {
-    final isUpdatable = _updatableButtons.contains(label);
-    String? mappedLabel = _temperatureMapping[label] ?? label;
+  // Gets the source label for read-only buttons (TI7 for TI9, TI22 for TI21)
 
-    showDialog(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            title: Text(
-              '${widget.chillerName} - $label${isUpdatable ? ' → $mappedLabel' : ''}',
-            ),
-            content: SizedBox(
-              width: double.maxFinite,
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: _temperatureValues.length,
-                itemBuilder: (context, index) {
-                  if (isUpdatable) {
-                    return Row(
-                      children: [
-                        // Original temperature value
-                        Expanded(
-                          flex: 2,
-                          child: ListTile(
-                            title: Text(
-                              '${_temperatureValues[index].toStringAsFixed(2)} °C',
-                            ),
-                            trailing: TextButton(
-                              onPressed: () => _showManualInputDialog(index),
-                              child: const Text('Update'),
-                            ),
-                          ),
-                        ),
-
-                        // Vertical divider
-                        const VerticalDivider(width: 1.5, color: Colors.black),
-
-                        // Updated value display
-                        Expanded(
-                          flex: 1,
-                          child: Center(
-                            child: Text(
-                              _updatedValues.containsKey(index)
-                                  ? '${_updatedValues[index]!.toStringAsFixed(2)} °C'
-                                  : '--',
-                              style: TextStyle(
-                                color:
-                                    _updatedValues.containsKey(index)
-                                        ? Colors.green
-                                        : Colors.grey,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  } else {
-                    // Read-only display for non-updatable buttons
-                    return ListTile(
-                      title: Text(
-                        '${_temperatureValues[index].toStringAsFixed(2)} °C',
-                      ),
-                    );
-                  }
-                },
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Close'),
-              ),
-            ],
-          ),
-    );
+  String? _getSourceLabelForReadOnly(String readOnlyLabel) {
+    switch (readOnlyLabel) {
+      case 'TI2':
+        return 'TI1'; // TI2 will show TI1's updates
+      case 'TI9':
+        return 'TI7';
+      case 'TI21':
+        return 'TI22';
+      default:
+        return null;
+    }
   }
 
-  void _showManualInputDialog(int index) {
+  Future<Map<int, double>> _fetchUpdatedValues(String label) async {
+    final apiUrl = 'http://127.0.0.1:5000/api/get_updated_values';
+    final mappedLabel = _temperatureMapping[label] ?? label;
+
+    try {
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'table_name': '${mappedLabel}_chiller'}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        Map<int, double> result = {};
+        for (var item in data) {
+          result[item['index_position']] = item['value'].toDouble();
+        }
+        return result;
+      }
+      return {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  Future<void> _saveUpdatedValueToDatabase(
+    String label,
+    double value,
+    int index,
+  ) async {
+    final apiUrl = 'http://127.0.0.1:5000/api/save_temperature';
+    final mappedLabel = _temperatureMapping[label] ?? label;
+    final tableName = '${mappedLabel}_chiller';
+
+    final payload = {
+      'table_name': tableName,
+      'value': value,
+      'index': index,
+      'timestamp': DateTime.now().toIso8601String(),
+    };
+
+    try {
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      );
+
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Saved to database!')));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save: ${response.body}')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+  }
+
+  void _showManualInputDialog(int index, String label) {
     TextEditingController controller = TextEditingController(
       text:
           _updatedValues.containsKey(index)
@@ -182,11 +201,7 @@ class _ChillerState extends State<Chiller> {
                       _updatedValues[index] = value;
                     });
                     Navigator.of(context).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Value updated successfully!'),
-                      ),
-                    );
+                    _saveUpdatedValueToDatabase(label, value, index);
                   } else {
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(
@@ -211,7 +226,6 @@ class _ChillerState extends State<Chiller> {
     final width = containerWidth.clamp(minWidth, maxWidth);
     final fontSize = width * 0.12;
     final chillerHeight = width * 0.6;
-
     final buttonCount = widget.buttonLabels.length;
     final dynamicButtonFontSize = fontSize * (buttonCount > 2 ? 0.7 : 0.9);
 
@@ -227,11 +241,9 @@ class _ChillerState extends State<Chiller> {
               color: Colors.black,
             ),
           ),
-
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Left Chiller Box
             Container(
               width: width * 0.7,
               height: chillerHeight,
@@ -276,8 +288,6 @@ class _ChillerState extends State<Chiller> {
                 ],
               ),
             ),
-
-            // Right Side Buttons
             Container(
               width: width * 0.3,
               height: chillerHeight,
@@ -316,6 +326,92 @@ class _ChillerState extends State<Chiller> {
           ],
         ),
       ],
+    );
+  }
+
+  void _showTemperatureDialog(String label) {
+    final isUpdatable = _updatableButtons.contains(label);
+    final isReadOnly = _readOnlyButtons.contains(label);
+    String mappedLabel = _temperatureMapping[label] ?? label;
+
+    showDialog(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: Text(
+              '${widget.chillerName} - $label${isUpdatable ? ' → $mappedLabel' : ''}',
+            ),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: _temperatureValues.length,
+                itemBuilder: (context, index) {
+                  if (isReadOnly) {
+                    // Only for read-only buttons (TI9/TI21) - show left and right columns
+                    return Row(
+                      children: [
+                        Expanded(
+                          flex: 2,
+                          child: ListTile(
+                            title: Text(
+                              '${_temperatureValues[index].toStringAsFixed(2)} °C',
+                            ),
+                          ),
+                        ),
+                        const VerticalDivider(width: 1.5, color: Colors.black),
+                        Expanded(
+                          flex: 1,
+                          child: Center(
+                            child: Text(
+                              (_allUpdatedValues[label]?.containsKey(index) ??
+                                      false)
+                                  ? '${_allUpdatedValues[label]?[index]!.toStringAsFixed(2)} °C'
+                                  : '--',
+                              style: TextStyle(
+                                color:
+                                    (_allUpdatedValues[label]?.containsKey(
+                                              index,
+                                            ) ??
+                                            false)
+                                        ? Colors.green
+                                        : Colors.grey,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  } else if (isUpdatable) {
+                    // For updatable buttons (TI7/TI22) - show only left column with Update button
+                    return ListTile(
+                      title: Text(
+                        '${_temperatureValues[index].toStringAsFixed(2)} °C',
+                      ),
+                      trailing: TextButton(
+                        onPressed: () => _showManualInputDialog(index, label),
+                        child: const Text('Update'),
+                      ),
+                    );
+                  } else {
+                    // For all other buttons - simple display
+                    return ListTile(
+                      title: Text(
+                        '${_temperatureValues[index].toStringAsFixed(2)} °C',
+                      ),
+                    );
+                  }
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
     );
   }
 }

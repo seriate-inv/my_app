@@ -66,21 +66,14 @@ class _TankState extends State<Tank> {
   List<double> _tempValues = [];
   String _currentLabel = "";
 
-  Map<String, double> _latestValue = {};
-  Map<String, String> _mappedLabels = {
-    'TI1': 'TI2',
-    'TI7': 'TI9',
-    'TI15': 'TI16',
-    'TI22': 'TI21',
-    'TC': 'TH',
-  };
+  // Track updates by label and index position
+  Map<String, Map<int, double>> _chillerUpdates = {}; 
 
-  Map<String, String> _reverseMappedLabels = {
-    'TI2': 'TI1',
-    'TI9': 'TI7',
-    'TI16': 'TI15',
-    'TI21': 'TI22',
-    'TH': 'TC',
+  // Mapping between chiller sources and tank display labels
+  final Map<String, String> _chillerToTankMapping = {
+    'TI101': 'TI2',  // TI101 (TI1) updates will show in TI2
+    'TI107': 'TI9',  // TI107 (TI7) updates will show in TI9
+    'TI122': 'TI21', // TI122 (TI22) updates will show in TI21
   };
 
   Future<void> _fetchTemperature(String label) async {
@@ -93,6 +86,17 @@ class _TankState extends State<Tank> {
     try {
       final data = await TankService().fetchTankData();
       if (!mounted) return;
+
+      // For mapped labels, fetch updates from corresponding chiller tables
+      if (_chillerToTankMapping.containsValue(label)) {
+        final chillerLabel = _chillerToTankMapping.entries
+            .firstWhere((entry) => entry.value == label)
+            .key;
+        final updates = await _fetchChillerUpdates(chillerLabel);
+        setState(() {
+          _chillerUpdates[label] = updates;
+        });
+      }
 
       setState(() {
         _tempValues = data.map((item) => item.temperature).toList();
@@ -112,60 +116,83 @@ class _TankState extends State<Tank> {
     }
   }
 
+  Future<Map<int, double>> _fetchChillerUpdates(String chillerLabel) async {
+    final apiUrl = 'http://127.0.0.1:5000/api/get_updated_values';
+    
+    try {
+      final response = await http.post(
+        Uri.parse(apiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'table_name': '${chillerLabel}_chiller'}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        Map<int, double> result = {};
+        for (var item in data) {
+          result[item['index_position']] = item['value'].toDouble();
+        }
+        return result;
+      }
+      return {};
+    } catch (e) {
+      return {};
+    }
+  }
+
   void _showTemperatureDialog(String label) {
+    final hasChillerUpdates = _chillerToTankMapping.containsValue(label);
+    final updates = hasChillerUpdates ? _chillerUpdates[label] : null;
+
     showDialog(
       context: context,
-      builder:
-          (context) => AlertDialog(
-            title: Text('$label Tank Temperature Readings'),
-            content: SizedBox(
-              width: double.maxFinite,
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: _tempValues.length,
-                itemBuilder: (context, index) {
-                  final original = _tempValues[index];
-                  return ListTile(
-                    title: Text('Original: ${original.toStringAsFixed(2)} °C'),
-                    trailing: ElevatedButton(
-                      child: const Text('Update'),
-                      onPressed: () {
-                        _updateTemperature(label, original);
-                        Navigator.of(context).pop();
-                      },
+      builder: (context) => AlertDialog(
+        title: Text('$label Temperature Readings'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: _tempValues.length,
+            itemBuilder: (context, index) {
+              final original = _tempValues[index];
+              final updatedValue = updates?[index];
+
+              return Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: ListTile(
+                      title: Text('${original.toStringAsFixed(2)} °C'),
                     ),
-                  );
-                },
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Close'),
-              ),
-            ],
+                  ),
+                  if (updatedValue != null) ...[
+                    const VerticalDivider(width: 1.5, color: Colors.black),
+                    Expanded(
+                      flex: 1,
+                      child: Center(
+                        child: Text(
+                          '${updatedValue.toStringAsFixed(2)} °C',
+                          style: TextStyle(
+                            color: Colors.green,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              );
+            },
           ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
     );
-  }
-
-  void _updateTemperature(String label, double originalTemp) {
-    final mapped = _mappedLabels[label];
-    if (mapped != null) {
-      setState(() {
-        _latestValue[mapped] = originalTemp + 3.0; // simulate updated value
-      });
-    }
-  }
-
-  String? _getMappedDisplay(String label) {
-    if (_reverseMappedLabels.containsKey(label)) {
-      final source = _reverseMappedLabels[label]!;
-      final updated = _latestValue[label];
-      if (updated != null) {
-        return '${source}: ${updated.toStringAsFixed(2)} °C';
-      }
-    }
-    return null;
   }
 
   @override
@@ -264,8 +291,6 @@ class _TankState extends State<Tank> {
   }
 
   Widget _buildTemperatureButton({required String label}) {
-    final mappedDisplay = _getMappedDisplay(label);
-
     return Container(
       width: 50,
       height: 30,
@@ -279,34 +304,23 @@ class _TankState extends State<Tank> {
         child: InkWell(
           onTap: () => _fetchTemperature(label),
           child: Center(
-            child:
-                _isLoading && _currentLabel == label
-                    ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.black,
-                      ),
-                    )
-                    : mappedDisplay != null
-                    ? Text(
-                      mappedDisplay,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 8,
-                        color: Colors.black,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    )
-                    : Text(
-                      label,
-                      style: const TextStyle(
-                        color: Colors.black,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
+            child: _isLoading && _currentLabel == label
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.black,
                     ),
+                  )
+                : Text(
+                    label, // Always show just the label (TI2, TI9, etc.)
+                    style: const TextStyle(
+                      color: Colors.black,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
           ),
         ),
       ),
